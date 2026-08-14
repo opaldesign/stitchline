@@ -715,7 +715,7 @@
       </label>
       <div class="global-actions">
         <p class="global-status" id="global-status"></p>
-        <button class="btn primary" id="export-all-btn" hidden>Download all</button>
+        <button class="btn primary" id="export-all-btn">Download all</button>
       </div>
     </div>
   </div>
@@ -870,15 +870,27 @@
   let downloadsApi = null;
   (async () => {
     try { downloadsApi = await claude.use('downloads'); } catch (err) { downloadsApi = null; }
-    exportAllBtn.hidden = !downloadsApi;
   })();
 
+  // Outside the Claude artifact runtime (e.g. hosted plainly on the web)
+  // there's no capability to hand a file straight to disk, so the fallback
+  // modal is how every save happens there. showFallback() returns a promise
+  // that resolves once the viewer closes it, so a batch download can wait
+  // for each photo to be saved before moving on to the next one.
+  let modalResolve = null;
   function showFallback(dataUrl){
-    modalImg.src = dataUrl;
-    modal.hidden = false;
+    return new Promise(resolve => {
+      modalResolve = resolve;
+      modalImg.src = dataUrl;
+      modal.hidden = false;
+    });
   }
-  modalClose.addEventListener('click', () => { modal.hidden = true; });
-  modal.addEventListener('click', (ev) => { if (ev.target === modal) modal.hidden = true; });
+  function closeFallbackModal(){
+    modal.hidden = true;
+    if (modalResolve){ modalResolve(); modalResolve = null; }
+  }
+  modalClose.addEventListener('click', closeFallbackModal);
+  modal.addEventListener('click', (ev) => { if (ev.target === modal) closeFallbackModal(); });
 
   function slugify(str){
     return str.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '');
@@ -1475,11 +1487,16 @@
               const code = err && err.code;
               if (code === 'declined') status.textContent = 'Cancelled.';
               else if (code === 'rate_limited') { status.textContent = '⚠ Busy — try again.'; status.classList.add('err'); }
-              else { showFallback(canvas.toDataURL('image/png')); status.textContent = ''; }
+              else {
+                status.textContent = 'Save the image, then continue.';
+                await showFallback(canvas.toDataURL('image/png'));
+                status.textContent = 'Saved.';
+              }
             }
           } else {
-            showFallback(canvas.toDataURL('image/png'));
-            status.textContent = '';
+            status.textContent = 'Save the image, then continue.';
+            await showFallback(canvas.toDataURL('image/png'));
+            status.textContent = 'Saved.';
           }
           resolve();
         }, 'image/png');
