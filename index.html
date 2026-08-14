@@ -867,16 +867,35 @@
   const modalImg = document.getElementById('modal-img');
   const modalClose = document.getElementById('modal-close');
 
+  // Inside a Claude artifact, the page runs in a locked-down frame where a
+  // normal browser download is blocked outright — the only way to save a
+  // file is the claude.use('downloads') capability, or (if that's not
+  // granted) the long-press/right-click fallback modal. Outside that frame
+  // — a plain page, e.g. hosted on GitHub Pages — none of that applies:
+  // it's just a normal website, so a standard <a download> click works and
+  // triggers a real one-click download. hasClaudeRuntime tells these apart.
+  const hasClaudeRuntime = (typeof window.claude !== 'undefined');
   let downloadsApi = null;
   (async () => {
+    if (!hasClaudeRuntime) return;
     try { downloadsApi = await claude.use('downloads'); } catch (err) { downloadsApi = null; }
   })();
 
-  // Outside the Claude artifact runtime (e.g. hosted plainly on the web)
-  // there's no capability to hand a file straight to disk, so the fallback
-  // modal is how every save happens there. showFallback() returns a promise
-  // that resolves once the viewer closes it, so a batch download can wait
-  // for each photo to be saved before moving on to the next one.
+  function triggerBrowserDownload(blob, name){
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }
+
+  // The fallback modal is only ever needed inside the artifact frame, when
+  // the downloads capability isn't granted there. showFallback() returns a
+  // promise that resolves once the viewer closes it, so a batch download
+  // can wait for each photo to be saved before moving on to the next one.
   let modalResolve = null;
   function showFallback(dataUrl){
     return new Promise(resolve => {
@@ -1493,6 +1512,9 @@
                 status.textContent = 'Saved.';
               }
             }
+          } else if (!hasClaudeRuntime){
+            triggerBrowserDownload(blob, filename());
+            status.textContent = 'Saved.';
           } else {
             status.textContent = 'Save the image, then continue.';
             await showFallback(canvas.toDataURL('image/png'));
